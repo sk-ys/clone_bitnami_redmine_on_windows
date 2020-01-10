@@ -311,8 +311,8 @@ class CloneRedmine
       }
     }
 
-    puts "please install service"
-    puts "#{File.expand_path(target_file_0)} INSTALL"
+    # register service
+    system "powershell start-process ""#{File.expand_path(target_file_0)} INSTALL"" -verb runas"
   end
 
   def update_scripts_servicerun_bat
