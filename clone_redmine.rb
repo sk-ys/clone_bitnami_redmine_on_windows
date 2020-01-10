@@ -5,11 +5,10 @@
 
 
 require "fileutils"
-# require "mysql2"
 require "yaml"
 
+
 module CommonFunctions
-  # functions
   def add_version(path)
     i = 1
     path_ext = File.extname(path)
@@ -99,6 +98,7 @@ class CloneRedmine
 
   end
 
+
   def update_additional_environment_rb_source
     target_file = "/htdocs/config/additional_environment.rb"
 
@@ -112,6 +112,7 @@ class CloneRedmine
       fw.puts "    :path => config.action_controller.relative_url_root"
     }
   end
+
 
   def update_configuration_yml_source
     target_file = "/htdocs/config/configuration.yml"
@@ -136,6 +137,7 @@ class CloneRedmine
     FileUtils.rm(target_file_0)  # remove temp file
   end
 
+
   def xcopy
     command = "xcopy "
     command << @redmine_source.name + " "
@@ -144,11 +146,13 @@ class CloneRedmine
     system command
   end
 
+
   def clear_plugins
     target_dir = "#{@redmine_new.name}/htdocs/plugins"
     FileUtils.rm_rf target_dir
     FileUtils.mkdir_p target_dir
   end
+
 
   def update_bitnami_apps_prefix_conf
     # update "..\apache2\conf\bitnami\bitnami-apps-prefix.conf"
@@ -158,6 +162,7 @@ class CloneRedmine
     file = File.open(target_file_1, "a")
     file.puts 'Include "' + File.realdirpath(@redmine_new.name + "/conf/httpd-prefix.conf") + '"'
   end
+
 
   def update_conf_httpd_app_conf
     target_file = "/conf/httpd-app.conf"
@@ -179,6 +184,7 @@ class CloneRedmine
     }
   end
 
+
   def update_conf_httpd_prefix_conf
     target_file = "/conf/httpd-prefix.conf"
     target_file_0 = @redmine_source.name + target_file
@@ -199,6 +205,7 @@ class CloneRedmine
     }
   end
 
+
   def update_conf_httpd_vhosts_conf
     target_file = "/conf/httpd-vhosts.conf"
     target_file_0 = @redmine_source.name + target_file
@@ -218,6 +225,7 @@ class CloneRedmine
       }
     }
   end
+
 
   def update_additional_environment_rb
     target_file = "/htdocs/config/additional_environment.rb"
@@ -258,26 +266,40 @@ class CloneRedmine
         }
       }
     }
-
-    print_db_command
   end
 
-  def print_db_command
+
+  def create_database
     database_yml = YAML.load_file(@redmine_new.name + "/htdocs/config/database.yml")
+
     new_db_database = database_yml["production"]["database"]
     new_db_username = database_yml["production"]["username"]
     new_db_host = database_yml["production"]["host"].gsub(/127\.0\.0\.1/, "localhost")
-    puts "mysql -u root -p"
-    puts "CREATE DATABASE #{new_db_database} CHARACTER SET utf8;"
-    puts "GRANT ALL PRIVILEGES ON #{new_db_database}.* TO '#{new_db_username}'@'#{new_db_host}';"
-    puts "quit"
+
+    # create sql command
+    target_file = "create_database_#{@redmine_new.name}.sql"
+    File.open(target_file, mode = "w"){|fw|
+      fw.puts "CREATE DATABASE #{new_db_database} CHARACTER SET utf8;"
+      fw.puts "GRANT ALL PRIVILEGES ON #{new_db_database}.* TO '#{new_db_username}'@'#{new_db_host}';"
+    }
+
+    # run sql command
+    puts ""
+    puts "mysql user? [blank: root]"
+    mysql_user = gets.chomp
+    mysql_user = "root" if mysql_user.empty?
+
+    puts "mysql password?"
+    mysql_password = gets.chomp
+
+    db_command = "mysql -u #{mysql_user} --password=#{mysql_password} < ""#{File.expand_path(target_file)}"""
+    puts db_command
+    system db_command
+
+    # delete sql
+    FileUtils.rm target_file
   end
 
-  def create_db_dev
-    puts "Mysql2 password?"
-    password_db = gets
-    client = Mysql2::Client.new(host: "localhost", username: "root", password: password_db, database: "mysql")
-  end
 
   def generate_secret_token
     Dir.chdir(@redmine_new.name + "/htdocs/") do
@@ -285,11 +307,13 @@ class CloneRedmine
     end
   end
 
+
   def migration
     Dir.chdir(@redmine_new.name + "/htdocs/") do
       system "bundle exec rake db:migrate RAILS_ENV=production"
     end
   end
+
 
   def update_scripts_serviceinstall_bat
     target_file = "/scripts/serviceinstall.bat"
@@ -312,8 +336,9 @@ class CloneRedmine
     }
 
     # register service
-    system "powershell start-process ""#{File.expand_path(target_file_0)} INSTALL"" -verb runas"
+    system "powershell start-process ""#{File.expand_path(target_file_1)} INSTALL"" -verb runas"
   end
+
 
   def update_scripts_servicerun_bat
     target_file = "/scripts/servicerun.bat"
@@ -333,25 +358,31 @@ class CloneRedmine
     }
   end
 
-  def update_main_serviceinstall_bat
-    target_file = "../serviceinstall.bat"
 
+  def update_main_bat_commonprocess(target_file)
     target_file_0 = target_file + ".tmp"
     target_file_1 = target_file
     exit if !check_file(target_file_1, true)
 
     FileUtils.cp(target_file_1, target_file_0)  # create temp file
 
-    line_buf = ""
+    line_new = ""
     File.open(target_file_1, mode = "w"){|fw|
       File.open(target_file_0, mode = "rt"){|fr|
         fr.each_line{|line|
-          if line.match(/^rem redmine_code_end/)
-            line_buf = line_buf.gsub(/\\#{@redmine_source.name}\\/, "\\#{@redmine_new.name}\\" )
-            fw.puts line_buf
-          else
-            line_buf = line
+          if line.match(/\\#{@redmine_new.name}\\/)
+            puts "Command already exists"
+            break
           end
+
+          if line.match(/\\#{@redmine_source.name}\\/)
+            line_new = line.gsub(/\\#{@redmine_source.name}\\/, "\\#{@redmine_new.name}\\" )
+          end
+
+          if line.match(/^rem redmine_code_end/)
+            fw.puts line_new
+          end
+
           fw.puts line
         }
       }
@@ -359,33 +390,19 @@ class CloneRedmine
 
     FileUtils.rm(target_file_0)  # remove temp file
   end
+
+
+  def update_main_serviceinstall_bat
+    target_file = "../serviceinstall.bat"
+    update_main_bat_commonprocess(target_file)
+  end
+
 
   def update_main_servicerun_bat
     target_file = "../servicerun.bat"
-
-    target_file_0 = target_file + ".tmp"
-    target_file_1 = target_file
-    exit if !check_file(target_file_1, true)
-
-    FileUtils.cp(target_file_1, target_file_0)  # create temp file
-
-    line_buf = ""
-    File.open(target_file_1, mode = "w"){|fw|
-      File.open(target_file_0, mode = "rt"){|fr|
-        fr.each_line{|line|
-          if line.match(/^rem redmine_code_end/)
-            line_buf = line_buf.gsub(/\\#{@redmine_source.name}\\/, "\\#{@redmine_new.name}\\" )
-            fw.puts line_buf
-          else
-            line_buf = line
-          end
-          fw.puts line
-        }
-      }
-    }
-
-    FileUtils.rm(target_file_0)  # remove temp file
+    update_main_bat_commonprocess(target_file)
   end
+
 
   def update_main_properties_ini
     target_file = "../properties.ini"
@@ -419,16 +436,23 @@ end
 
 ope_clone_redmine.xcopy
 ope_clone_redmine.clear_plugins
+
 ope_clone_redmine.update_bitnami_apps_prefix_conf
 ope_clone_redmine.update_conf_httpd_app_conf
 ope_clone_redmine.update_conf_httpd_prefix_conf
 ope_clone_redmine.update_conf_httpd_vhosts_conf
+
 ope_clone_redmine.update_additional_environment_rb
+
 ope_clone_redmine.update_config_database_yml
+ope_clone_redmine.create_database
+
 ope_clone_redmine.generate_secret_token
 ope_clone_redmine.migration
+
 ope_clone_redmine.update_scripts_serviceinstall_bat
 ope_clone_redmine.update_scripts_servicerun_bat
+
 ope_clone_redmine.update_main_serviceinstall_bat
 ope_clone_redmine.update_main_servicerun_bat
 ope_clone_redmine.update_main_properties_ini
